@@ -26,10 +26,14 @@ jobs:
       - name: Run check updates script
         run: python check_updates.py
 
+      - name: Print current working directory
+        run: pwd
+
       - name: Commit and push changes
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          chmod 644 update_info.txt
           git add update_info.txt
           if git diff --staged --quiet; then
             echo "No updates to commit."
