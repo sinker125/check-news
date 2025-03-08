@@ -8,6 +8,13 @@ def read_anchor_list(file_path):
     with open(file_path, 'r', encoding='utf-8') as file:
         return [line.strip() for line in file.readlines()]
 
+# 读取黑名单
+def read_blacklist(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, 'r', encoding='utf-8') as file:
+            return [line.strip() for line in file.readlines()]
+    return []
+
 # 读取已处理的音频信息
 def read_processed_audio(file_path):
     if os.path.exists(file_path):
@@ -16,7 +23,7 @@ def read_processed_audio(file_path):
     return []
 
 # 检查主播是否有更新
-def check_update(anchor_url, processed_audio):
+def check_update(anchor_url, processed_audio, blacklist):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
     try:
@@ -26,7 +33,7 @@ def check_update(anchor_url, processed_audio):
         latest_audio = soup.find('div', class_='latest-audio-class')  # 示例选择器，需调整
         if latest_audio:
             audio_name = latest_audio.find('a').text.strip()
-            if audio_name not in processed_audio:
+            if audio_name not in processed_audio and audio_name not in blacklist:
                 audio_url = latest_audio.find('a')['href']
                 return audio_name, audio_url
     except Exception as e:
@@ -43,13 +50,15 @@ def write_updates(updates, file_path):
 
 def main():
     anchor_list_file = 'anchor_list.txt'
+    blacklist_file = 'blacklist.txt'
     update_file = 'update_info.txt'
     anchors = read_anchor_list(anchor_list_file)
+    blacklist = read_blacklist(blacklist_file)
     processed_audio = read_processed_audio(update_file)
     new_updates = []
 
     for anchor in anchors:
-        audio_name, audio_url = check_update(anchor, processed_audio)
+        audio_name, audio_url = check_update(anchor, processed_audio, blacklist)
         if audio_name and audio_url:
             new_updates.append((audio_name, audio_url))
         time.sleep(5)  # 每个请求间隔 5 秒
