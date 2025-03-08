@@ -1,80 +1,111 @@
-import requests
-from bs4 import BeautifulSoup
-import os
-import time
+# .github/workflows/monitor_podcasts.yml
+name: Podcast Update Monitor
 
-# 读取主播列表
-def read_anchor_list(file_path):
-    with open(file_path, 'r', encoding='utf-8') as file:
-        return [line.strip() for line in file.readlines()]
+on:
+  schedule:
+    - cron: '0 22 * * *'  # 北京时间每天6点（UTC+8时区）<button class="citation-flag" data-index="7">
+  workflow_dispatch:      # 允许手动触发<button class="citation-flag" data-index="8">
 
-# 读取黑名单
-def read_blacklist(file_path):
-    if os.path.exists(file_path):
-        with open(file_path, 'r', encoding='utf-8') as file:
-            return [line.strip() for line in file.readlines()]
-    return []
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4  # 确保获取最新代码<button class="citation-flag" data-index="7">
 
-# 读取已处理的音频信息
-def read_processed_audio(file_path):
-    if os.path.exists(file_path):
-        with open(file_path, 'r', encoding='utf-8') as file:
-            return [line.split('&&')[0] for line in file.readlines()]
-    return []
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'  # 固定Python版本<button class="citation-flag" data-index="9">
 
-# 检查主播是否有更新
-def check_update(anchor_url, processed_audio, blacklist):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
-    }
-    try:
-        response = requests.get(anchor_url, headers=headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        # 这里需要根据喜马拉雅网页结构调整选择器
-        latest_audio = soup.find('div', class_='latest-audio-class')  # 示例选择器，需调整
-        if latest_audio:
-            audio_name = latest_audio.find('a').text.strip()
-            print(f"Blacklist: {blacklist}")
-            print(f"Processed audio: {processed_audio}")
-            print(f"Found audio: {audio_name}")
-            if audio_name not in processed_audio and audio_name not in blacklist:
-                audio_url = latest_audio.find('a')['href']
-                print(f"Audio URL: {audio_url}")
-                return audio_name, audio_url
-    except Exception as e:
-        print(f"Error checking {anchor_url}: {e}")
-    return None, None
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install requests==2.31.0 beautifulsoup4==4.12.3 fake-useragent==1.1.3
+      # 依赖版本锁定保证稳定性<button class="citation-flag" data-index="3">
 
-# 写入更新信息到文件
-def write_updates(updates, file_path):
-    if not updates:
-        return
-    with open(file_path, 'a', encoding='utf-8') as file:
-        for name, url in updates:
-            file.write(f"{name}&&{url}\n")
+    - name: Execute monitoring script
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        python <<EOF
+        # 注意：此处需严格保持缩进<button class="citation-flag" data-index="9">
+        import os
+        import re
+        import time
+        import random
+        from fake_useragent import UserAgent
+        from bs4 import BeautifulSoup
+        import requests
 
-def main():
-    anchor_list_file = 'anchor_list.txt'
-    blacklist_file = 'blacklist.txt'
-    update_file = 'update_info.txt'
-    # 确保文件存在
-    if not os.path.exists(update_file):
-        with open(update_file, 'w', encoding='utf-8') as f:
-            pass
-    anchors = read_anchor_list(anchor_list_file)
-    blacklist = read_blacklist(blacklist_file)
-    processed_audio = read_processed_audio(update_file)
-    new_updates = []
+        MONITOR_FILE = 'monitor_list.txt'
+        OUTPUT_FILE = 'podcast_updates.txt'
+        BLACKLIST_FILE = 'blacklist.txt'
 
-    for anchor in anchors:
-        audio_name, audio_url = check_update(anchor, processed_audio, blacklist)
-        if audio_name and audio_url:
-            new_updates.append((audio_name, audio_url))
-        time.sleep(5)  # 每个请求间隔 5 秒
+        def read_config(file_path):
+            try:
+                with open(file_path, 'r') as f:
+                    return [line.strip() for line in f if line.strip()]
+            except FileNotFoundError:
+                return []
 
-    write_updates(new_updates, update_file)
+        def get_session():
+            ua = UserAgent()
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': ua.random,
+                'Referer': 'https://www.ximalaya.com/',
+                'Accept-Language': 'zh-CN,zh;q=0.9'
+            })
+            return session
 
-if __name__ == "__main__":
-    main()
+        def parse_audio_info(url):
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    time.sleep(random.uniform(1, 3))
+                    response = get_session().get(url, timeout=10)
+                    response.encoding = 'utf-8'
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    
+                    # 需根据实际DOM结构调整选择器<button class="citation-flag" data-index="7">
+                    title = soup.select_one('.title').text.strip()
+                    audio_url = soup.select_one('audio')['src']
+                    return f"{title}&&{audio_url}"
+                except Exception as e:
+                    print(f"Attempt {attempt+1} failed: {e}")
+                    if attempt == max_retries - 1:
+                        return None
+
+        def main():
+            monitors = read_config(MONITOR_FILE)
+            blacklist = read_config(BLACKLIST_FILE)
+            existing = read_config(OUTPUT_FILE)
+            
+            new_updates = []
+            for url in monitors:
+                print(f"Checking: {url}")
+                result = parse_audio_info(url)
+                if result:
+                    if result not in existing and not any(keyword in result for keyword in blacklist):
+                        new_updates.append(result)
+            
+            if new_updates:
+                with open(OUTPUT_FILE, 'a') as f:
+                    f.write('\n' + '\n'.join(new_updates) + '\n')
+                
+                # 自动提交变更<button class="citation-flag" data-index="7">
+                os.system('git config --global user.name "github-actions"')
+                os.system('git config --global user.email "actions@github.com"')
+                os.system(f'git commit -am "Add {len(new_updates)} new entries"')
+                os.system(f'git push https://{os.environ["GITHUB_ACTOR"]}:{os.environ["GITHUB_TOKEN"]}@github.com/{os.environ["GITHUB_REPOSITORY"]}.git HEAD:main')
+
+        if __name__ == '__main__':
+            main()
+        EOF
+
+    - name: Check for failures
+      if: ${{ failure() }}
+      run: |
+        echo "::error::脚本执行失败，请检查日志"
+        exit 1  # 强制失败状态<button class="citation-flag" data-index="9">
