@@ -1,6 +1,7 @@
 name: Check Himalaya Updates
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 0 * * *'  # 每天 0 点执行
 
