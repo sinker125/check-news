@@ -1,7 +1,7 @@
 name: Update RSS Feed
 on:
   schedule:
-    - cron: '0 17 * * *'  # UTC 0/12点运行
+    - cron: '0 */12 * * *'  # UTC 0/12点运行
   workflow_dispatch:
 
 permissions:
@@ -26,10 +26,6 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # 升级 pip 到最新版本
-          python -m pip install --upgrade pip
-          # 升级依赖库到最新版本
-          pip install --upgrade requests beautifulsoup4 lxml
           # 安装指定版本的依赖库
           pip install requests==2.31.0 beautifulsoup4==4.12.2 lxml==4.9.3
 
@@ -58,6 +54,8 @@ jobs:
           import requests
           from bs4 import BeautifulSoup
           from urllib.parse import urlparse, parse_qs
+          from datetime import datetime
+          import random
 
           # 读取已存在的 URL（防重复）
           existing = set()
@@ -82,21 +80,36 @@ jobs:
 
           for rss in rss_list:
               try:
+                  # 为 URL 添加随机参数以绕过缓存
+                  rss_with_random = rss + ('&' if '?' in rss else '?') + f'random={random.random()}'
                   headers = {
                       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                       'Referer': 'https://www.ximalaya.com/',
-                      # 禁用缓存的请求头
                       'Cache-Control': 'no-cache, no-store, must-revalidate',
                       'Pragma': 'no-cache',
                       'Expires': '0'
                   }
-                  response = requests.get(rss, headers=headers, timeout=10)
+                  response = requests.get(rss_with_random, headers=headers, timeout=10)
                   response.raise_for_status()
                   soup = BeautifulSoup(response.content, 'xml')
 
                   for item in soup.find_all('item'):
                       title = item.title.text.strip().replace(' ', '_')
                       enclosure = item.find('enclosure')
+                      pub_date = item.find('pubDate')
+                      if pub_date:
+                          pub_date_str = pub_date.text
+                          try:
+                              pub_date = datetime.strptime(pub_date_str, '%a, %d %b %Y %H:%M:%S %z')
+                          except ValueError:
+                              try:
+                                  pub_date = datetime.strptime(pub_date_str, '%Y-%m-%dT%H:%M:%S%z')
+                              except ValueError:
+                                  try:
+                                      pub_date = datetime.strptime(pub_date_str, '%Y-%m-%d %H:%M:%S')
+                                  except ValueError:
+                                      print(f'Failed to parse date: {pub_date_str}')
+                                      pub_date = None
                       if enclosure and enclosure.get('url', '').endswith('.m4a'):
                           raw_url = enclosure['url']
                           parsed = urlparse(raw_url)
@@ -104,16 +117,26 @@ jobs:
 
                           # 严格过滤逻辑
                           if jt_url not in existing and jt_url not in deleted:
-                              new_entries.append(f\"{title}&&{jt_url}\")
+                              new_entries.append((pub_date, f\"{title}&&{jt_url}\"))
+                              print(f'Adding new entry: {jt_url}')  # 调试日志
                           else:
                               print(f'Skipped: {jt_url}')  # 调试日志
               except Exception as e:
                   print(f'Error processing {rss}: {str(e)}')
 
-          # 追加新条目到文件末尾
+          # 按发布时间降序排序
+          new_entries.sort(key=lambda x: x[0] if x[0] else datetime.min, reverse=True)
+          new_entries = [entry[1] for entry in new_entries]
+
+          # 插入新条目到文件开头
           if new_entries:
-              with open('rss.txt', 'a', encoding='utf-8') as f:
-                  f.write('\n'.join(new_entries) + '\n')"
+              try:
+                  with open('rss.txt', 'r', encoding='utf-8') as f:
+                      existing_content = f.read()
+              except FileNotFoundError:
+                  existing_content = ''
+              with open('rss.txt', 'w', encoding='utf-8') as f:
+                  f.write('\n'.join(new_entries) + '\n' + existing_content)"
 
       - name: Commit changes
         run: |
@@ -122,4 +145,3 @@ jobs:
           git add rss.txt deleted_urls.pure.txt
           git commit -m "Update RSS $(date +'%Y-%m-%d %H:%M')" || echo "No changes"
           git push origin main
-          
